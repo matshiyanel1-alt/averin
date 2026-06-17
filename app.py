@@ -4,12 +4,10 @@ Novaux AR Chase — Production App
 Deployed on Railway. Handles login, CSV upload, live chase, and post-chase report emails.
 """
 
-import os, csv, json, math, io, uuid, threading, time, smtplib, sys
+import os, csv, json, math, io, uuid, threading, time
 from datetime import datetime
 from pathlib import Path
 from queue import Queue, Empty
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from functools import wraps
 
 from flask import (Flask, request, jsonify, Response,
@@ -27,10 +25,8 @@ BLAND_API_KEY = os.getenv("BLAND_API_KEY", "")
 BLAND_HEADERS = {"authorization": BLAND_API_KEY, "Content-Type": "application/json"}
 BLAND_BASE    = "https://api.bland.ai/v1"
 
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASS = os.getenv("SMTP_PASSWORD", "")
+RESEND_API_KEY  = os.getenv("RESEND_API_KEY", "")
+RESEND_FROM     = os.getenv("RESEND_FROM", "Novaux AR Chase <onboarding@resend.dev>")
 
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "novaux2026")
 
@@ -123,20 +119,20 @@ def priority_score(amount, days_overdue):
 
 
 def send_email(to, subject, body_html, body_plain=None):
-    if not SMTP_USER or not SMTP_PASS:
-        return False, "SMTP not configured"
+    if not RESEND_API_KEY:
+        return False, "Resend API key not configured"
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"]    = SMTP_USER
-        msg["To"]      = to
+        payload = {"from": RESEND_FROM, "to": [to], "subject": subject, "html": body_html}
         if body_plain:
-            msg.attach(MIMEText(body_plain, "plain"))
-        msg.attach(MIMEText(body_html, "html"))
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
-            s.ehlo(); s.starttls(); s.login(SMTP_USER, SMTP_PASS)
-            s.sendmail(SMTP_USER, to, msg.as_string())
-        return True, "sent"
+            payload["text"] = body_plain
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+            json=payload, timeout=10
+        )
+        if resp.status_code in (200, 201):
+            return True, "sent"
+        return False, f"{resp.status_code}: {resp.text[:120]}"
     except Exception as e:
         return False, str(e)
 
@@ -329,15 +325,13 @@ def run_chase(session_id, debtors, client_company, demo_mode, report_email=None)
         emit({"type":"update","id":did,"status":"emailing","detail":"Sending personalised email..."})
         to_email = debtor.get("email","")
         if to_email:
-            email_ok, email_msg = True, "demo"
-            if not demo_mode or to_email == "matshiyane.l1@gmail.com":
-                body = debtor_email_body(debtor["contact_name"], debtor["account_name"],
-                                         amount, debtor.get("invoice_ref",""), client_company)
-                email_ok, email_msg = send_email(
-                    to_email,
-                    f"Outstanding Account — {debtor['account_name']}",
-                    body
-                )
+            body = debtor_email_body(debtor["contact_name"], debtor["account_name"],
+                                     amount, debtor.get("invoice_ref",""), client_company)
+            email_ok, email_msg = send_email(
+                to_email,
+                f"Outstanding Account — {debtor['account_name']}",
+                body
+            )
         else:
             email_ok, email_msg = False, "no email on record"
 
@@ -361,7 +355,7 @@ def run_chase(session_id, debtors, client_company, demo_mode, report_email=None)
         if call_ok:
             contacted += 1
             emit({"type":"update","id":did,"status":"contacted",
-                  "detail": f"AI call live{' (demo)' if demo_mode and call_id.startswith('demo-') else ''}",
+                  "detail": f"AI call live{' (demo)' if demo_mode and (call_id or '').startswith('demo-') else ''}",
                   "call_id": call_id})
         else:
             emit({"type":"update","id":did,"status":"call_failed","detail":f"Call failed: {call_err}"})
