@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Novaux — AR Chase</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+* { font-family: 'Inter', system-ui, sans-serif; box-sizing: border-box; }
+:root {
+  --bg:#0a0a0a; --sidebar:#111111; --card:#1a1a1a; --border:#27272a;
+  --primary:#3b82f6; --success:#22c55e; --warning:#eab308; --danger:#ef4444;
+  --t1:#f4f4f5; --t2:#a1a1aa; --t3:#71717a;
+}
+body { background:var(--bg); color:var(--t1); min-height:100vh; }
+
+.sidebar {
+  width:220px; flex-shrink:0; background:var(--sidebar);
+  border-right:1px solid var(--border);
+  position:fixed; inset-y:0; left:0;
+  display:flex; flex-direction:column; z-index:20;
+}
+.nav-group { padding:8px 0; border-bottom:1px solid var(--border); }
+.nav-label { font-size:10px; font-weight:600; color:var(--t3); text-transform:uppercase; letter-spacing:.08em; padding:8px 16px 4px; }
+.nav-item {
+  display:flex; align-items:center; gap:9px;
+  padding:8px 16px; font-size:13px; font-weight:500; color:var(--t2);
+  cursor:pointer; border-left:2px solid transparent; transition:all .15s;
+}
+.nav-item:hover { color:var(--t1); background:#18181b; }
+.nav-item.active { color:var(--t1); background:#18181b; border-left-color:var(--primary); }
+.nav-item svg { width:15px; height:15px; flex-shrink:0; }
+.sidebar-footer { margin-top:auto; padding:14px 16px; border-top:1px solid var(--border); }
+.user-row { display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:8px; cursor:pointer; transition:background .15s; }
+.user-row:hover { background:#18181b; }
+.avatar { width:28px; height:28px; border-radius:50%; background:linear-gradient(135deg,#3b82f6,#6366f1); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:white; flex-shrink:0; }
+
+.main { margin-left:220px; min-height:100vh; display:flex; flex-direction:column; }
+.topbar { height:54px; border-bottom:1px solid var(--border); background:var(--sidebar); display:flex; align-items:center; justify-content:space-between; padding:0 24px; position:sticky; top:0; z-index:10; }
+.breadcrumb { display:flex; align-items:center; gap:6px; font-size:13px; }
+.topbar-actions { display:flex; align-items:center; gap:8px; }
+
+.mode-chip { display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:9999px; font-size:11px; font-weight:600; border:1px solid; cursor:pointer; transition:all .15s; user-select:none; }
+.mode-chip.demo { background:rgba(34,197,94,.08); color:#22c55e; border-color:rgba(34,197,94,.2); }
+.mode-chip.live { background:rgba(239,68,68,.08); color:#ef4444; border-color:rgba(239,68,68,.2); }
+.mode-dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+.blink { animation:blink 1.4s ease-in-out infinite; }
+
+.tb-btn { display:inline-flex; align-items:center; gap:6px; padding:6px 13px; border-radius:7px; font-size:12px; font-weight:600; cursor:pointer; border:none; transition:all .15s; }
+.tb-ghost { background:#1a1a1a; border:1px solid var(--border); color:var(--t2); }
+.tb-ghost:hover { background:#27272a; color:var(--t1); }
+.tb-primary { background:var(--primary); color:white; }
+.tb-primary:hover { background:#2563eb; }
+.tb-primary:disabled { opacity:.3; cursor:not-allowed; pointer-events:none; }
+
+.content { padding:24px; }
+
+.kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:22px; }
+.kpi-card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:22px; box-shadow:0 8px 32px rgba(0,0,0,.4); }
+.kpi-icon { width:34px; height:34px; border-radius:9px; display:flex; align-items:center; justify-content:center; margin-bottom:16px; }
+.kpi-label { font-size:10px; font-weight:600; color:var(--t3); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; }
+.kpi-val { font-family:'Space Grotesk',sans-serif; font-size:32px; font-weight:700; letter-spacing:-.03em; line-height:1; margin-bottom:6px; }
+.kpi-val.green { color:var(--success); }
+.kpi-val.blue  { color:var(--primary); }
+.kpi-sub { font-size:11px; color:var(--t3); }
+
+.prog-panel { background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; margin-bottom:18px; }
+.prog-header { padding:14px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+.prog-track { height:3px; background:#27272a; }
+.prog-fill { height:100%; background:linear-gradient(90deg,var(--primary),#6366f1); transition:width .5s ease; }
+.feed { padding:12px 18px; max-height:150px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; }
+.feed::-webkit-scrollbar { width:3px; }
+.feed::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.feed-line { display:flex; gap:12px; font-size:11px; font-family:'Courier New',monospace; }
+.feed-ts { color:var(--t3); flex-shrink:0; }
+.feed-line.info .feed-msg { color:var(--t2); }
+.feed-line.ok   .feed-msg { color:var(--success); }
+.feed-line.err  .feed-msg { color:var(--danger); }
+.feed-line.dim  .feed-msg { color:var(--t3); }
+
+@keyframes slide-up { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+.slide-up { animation:slide-up .2s ease-out; }
+
+.table-panel { background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+.tbl-header { padding:16px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+table { width:100%; border-collapse:collapse; }
+thead th { font-size:10px; font-weight:600; color:var(--t3); text-transform:uppercase; letter-spacing:.07em; padding:10px 14px; text-align:left; border-bottom:1px solid var(--border); background:rgba(255,255,255,.01); }
+tbody tr { border-bottom:1px solid rgba(255,255,255,.03); transition:background .15s; cursor:pointer; }
+tbody tr:last-child { border-bottom:none; }
+tbody tr:hover { background:rgba(255,255,255,.025); }
+tbody tr.row-active  { background:rgba(59,130,246,.04); }
+tbody tr.row-success { background:rgba(34,197,94,.04); }
+td { padding:12px 14px; font-size:13px; }
+
+.badge { display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:9999px; font-size:10px; font-weight:600; white-space:nowrap; }
+.b-queued   { background:#27272a; color:#71717a; }
+.b-scoring  { background:rgba(59,130,246,.12); color:#60a5fa; }
+.b-emailing { background:rgba(56,189,248,.1); color:#38bdf8; }
+.b-emailed  { background:rgba(34,197,94,.08); color:#4ade80; }
+.b-calling  { background:rgba(234,179,8,.1); color:#eab308; animation:blink 1.2s ease-in-out infinite; }
+.b-called   { background:rgba(34,197,94,.12); color:#22c55e; }
+.b-failed   { background:rgba(239,68,68,.1); color:#ef4444; }
+.b-skipped  { background:#27272a; color:#52525b; }
+
+/* outcome badges */
+.out-promise  { background:rgba(34,197,94,.1); color:#22c55e; }
+.out-plan     { background:rgba(59,130,246,.1); color:#60a5fa; }
+.out-voicemail{ background:rgba(234,179,8,.08); color:#eab308; }
+.out-no-answer{ background:#27272a; color:#71717a; }
+.out-dispute  { background:rgba(239,68,68,.1); color:#ef4444; }
+
+.ov-track { display:inline-block; width:48px; height:3px; background:#27272a; border-radius:99px; vertical-align:middle; }
+.ov-fill  { height:100%; border-radius:99px; display:block; }
+
+.done-chip { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:9999px; font-size:11px; font-weight:600; background:rgba(34,197,94,.1); color:#22c55e; border:1px solid rgba(34,197,94,.2); }
+
+.empty { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:64px 24px; text-align:center; }
+
+/* ── Modal ── */
+.modal-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:50;
+  display:flex; align-items:center; justify-content:center;
+  backdrop-filter:blur(4px);
+}
+.modal {
+  background:#1a1a1a; border:1px solid #27272a;
+  border-radius:16px; width:600px; max-width:calc(100vw - 48px);
+  max-height:80vh; overflow-y:auto; box-shadow:0 32px 80px rgba(0,0,0,.7);
+}
+.modal::-webkit-scrollbar { width:4px; }
+.modal::-webkit-scrollbar-thumb { background:#27272a; border-radius:2px; }
+.modal-header { padding:20px 24px 16px; border-bottom:1px solid #27272a; display:flex; align-items:flex-start; justify-content:space-between; }
+.modal-body { padding:20px 24px; }
+.modal-close { width:28px; height:28px; border-radius:6px; background:#27272a; border:none; color:#a1a1aa; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background .15s; }
+.modal-close:hover { background:#3f3f46; color:#f4f4f5; }
+
+.transcript {
+  background:#111; border:1px solid #27272a; border-radius:10px;
+  padding:14px 16px; font-family:'Courier New',monospace; font-size:12px;
+  line-height:1.6; color:#a1a1aa; margin-top:12px;
+}
+.transcript .ai  { color:#60a5fa; }
+.transcript .human { color:#f4f4f5; }
+
+.rec-btn {
+  display:inline-flex; align-items:center; gap:6px;
+  padding:7px 14px; border-radius:8px; font-size:12px; font-weight:600;
+  border:1px solid; cursor:pointer; transition:all .15s; text-decoration:none;
+}
+.rec-live { background:rgba(239,68,68,.1); color:#ef4444; border-color:rgba(239,68,68,.3); }
+.rec-live:hover { background:rgba(239,68,68,.2); }
+.rec-demo { background:#27272a; color:#52525b; border-color:#27272a; cursor:default; }
+
+input.tb-input {
+  background:#1a1a1a; border:1px solid var(--border); border-radius:7px;
+  padding:6px 11px; font-size:12px; color:var(--t2); outline:none; width:160px; transition:border-color .15s;
+}
+input.tb-input:focus { border-color:rgba(59,130,246,.4); color:var(--t1); }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div style="padding:18px 16px 14px; border-bottom:1px solid var(--border);">
+    <img src="/static/novaux_logo.jpg" alt="Novaux Digital"
+      style="width:140px; border-radius:8px; background:#fff; padding:5px 8px; display:block;">
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-label">Workspace</div>
+    <div class="nav-item active">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm10 0a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zm10-3a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1h-4a1 1 0 01-1-1v-7z"/></svg>
+      Overview
+    </div>
+    <div class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      Accounts
+    </div>
+    <div class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>
+      Campaigns
+    </div>
+    <div class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+      Analytics
+    </div>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-label">System</div>
+    <div class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      Integrations
+    </div>
+    <div class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" stroke-width="1.8"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      Settings
+    </div>
+  </div>
+
+  <div class="sidebar-footer">
+    <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px;padding:0 2px;">
+      <div style="width:6px;height:6px;border-radius:50%;background:#22c55e;"></div>
+      <span style="font-size:10px;color:var(--t3);">All systems operational</span>
+    </div>
+    <div class="user-row">
+      <div class="avatar">N</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;font-weight:600;color:var(--t1);">Novaux Demo</div>
+        <div style="font-size:10px;color:var(--t3);">Admin · Free Trial</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<div class="main">
+  <div class="topbar">
+    <div class="breadcrumb">
+      <span style="color:var(--t3);">Workspace</span>
+      <span style="color:var(--t3);margin:0 4px;">/</span>
+      <span style="font-weight:600;">AR Chase</span>
+    </div>
+    <div class="topbar-actions">
+      <div class="mode-chip demo" id="modeChip" onclick="toggleMode()">
+        <div class="mode-dot" id="modeDot"></div>
+        <span id="modeLabel">Demo</span>
+      </div>
+      <input class="tb-input" id="clientInput" value="Novaux Demo Co" placeholder="Client name">
+      <input class="tb-input" id="reportEmail" placeholder="Report to (email)" style="width:180px;">
+      <button class="tb-btn tb-ghost" onclick="triggerUpload()">
+        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+        Upload CSV
+      </button>
+      <input type="file" id="fileInput" accept=".csv" style="display:none;" onchange="handleFile(this)">
+      <button class="tb-btn tb-ghost" onclick="loadDemo()">Load Demo</button>
+      <button class="tb-btn tb-primary" id="chaseBtn" onclick="startChase()" disabled>
+        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        <span id="chaseLbl">Launch Chase</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="content">
+    <!-- KPIs -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-icon" style="background:rgba(59,130,246,.1);">
+          <svg width="17" height="17" fill="none" stroke="#3b82f6" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </div>
+        <div class="kpi-label">Total Outstanding</div>
+        <div class="kpi-val" id="kpiOwed">—</div>
+        <div class="kpi-sub" id="kpiOwedSub">Load accounts to begin</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-icon" style="background:rgba(59,130,246,.1);">
+          <svg width="17" height="17" fill="none" stroke="#3b82f6" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        </div>
+        <div class="kpi-label">Accounts in Queue</div>
+        <div class="kpi-val blue" id="kpiCount">—</div>
+        <div class="kpi-sub">Priority ranked</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-icon" style="background:rgba(34,197,94,.1);">
+          <svg width="17" height="17" fill="none" stroke="#22c55e" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+        </div>
+        <div class="kpi-label">Est. Recoverable</div>
+        <div class="kpi-val green" id="kpiRecovery">—</div>
+        <div class="kpi-sub">62% benchmark · SA market</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-icon" style="background:rgba(34,197,94,.1);">
+          <svg width="17" height="17" fill="none" stroke="#22c55e" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/></svg>
+        </div>
+        <div class="kpi-label">Committed This Run</div>
+        <div class="kpi-val green" id="kpiCommitted">—</div>
+        <div class="kpi-sub" id="kpiCommittedSub">After chase completes</div>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="prog-panel" id="progPanel" style="display:none;">
+      <div class="prog-header">
+        <div style="display:flex;align-items:center;gap:9px;">
+          <div class="mode-dot blink" style="width:7px;height:7px;background:#3b82f6;border-radius:50%;"></div>
+          <span style="font-size:13px;font-weight:600;" id="progTitle">Chase in progress</span>
+        </div>
+        <span style="font-size:12px;color:var(--t3);font-family:'Courier New',monospace;" id="progLbl">0 / 0</span>
+      </div>
+      <div class="prog-track"><div class="prog-fill" id="progFill" style="width:0%"></div></div>
+      <div class="feed" id="feed"></div>
+    </div>
+
+    <!-- Table -->
+    <div class="table-panel">
+      <div id="emptyState" class="empty">
+        <div style="width:50px;height:50px;border-radius:13px;background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.15);display:flex;align-items:center;justify-content:center;margin-bottom:14px;">
+          <svg width="22" height="22" fill="none" stroke="#3b82f6" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        </div>
+        <p style="font-size:14px;font-weight:600;color:var(--t2);margin-bottom:4px;">No accounts loaded</p>
+        <p style="font-size:12px;color:var(--t3);margin-bottom:18px;">Upload a debtors CSV or load the demo dataset</p>
+        <div style="display:flex;gap:8px;">
+          <button class="tb-btn tb-primary" onclick="loadDemo()">Load 12 demo accounts</button>
+          <button class="tb-btn tb-ghost" onclick="triggerUpload()">Upload CSV</button>
+        </div>
+      </div>
+
+      <div id="tableWrap" style="display:none;">
+        <div class="tbl-header">
+          <div>
+            <div style="font-size:14px;font-weight:600;">Accounts — Priority Order</div>
+            <div style="font-size:11px;color:var(--t3);margin-top:2px;">Click any row to view call outcome &amp; transcript</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:12px;color:var(--t3);" id="tblSub"></span>
+            <div class="done-chip" id="doneChip" style="display:none;">
+              <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+              Chase complete
+            </div>
+          </div>
+        </div>
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:32px;">#</th>
+                <th>Account</th>
+                <th>Contact</th>
+                <th style="text-align:right;">Amount</th>
+                <th>Overdue</th>
+                <th style="text-align:right;">Priority</th>
+                <th style="text-align:center;">Status</th>
+                <th>Outcome</th>
+                <th style="text-align:right;">Committed</th>
+              <th style="text-align:center;">Payment</th>
+              </tr>
+            </thead>
+            <tbody id="accountTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- OUTCOME MODAL -->
+<div class="modal-overlay" id="modalOverlay" style="display:none;" onclick="closeModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <div style="font-size:15px;font-weight:700;margin-bottom:4px;" id="modalTitle"></div>
+        <div style="font-size:12px;color:var(--t2);" id="modalSub"></div>
+      </div>
+      <button class="modal-close" onclick="closeModal()">
+        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <!-- Outcome summary -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:18px;">
+        <div style="background:#111;border:1px solid #27272a;border-radius:10px;padding:14px;">
+          <div style="font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Outcome</div>
+          <div id="modalOutcomeBadge"></div>
+        </div>
+        <div style="background:#111;border:1px solid #27272a;border-radius:10px;padding:14px;">
+          <div style="font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Committed</div>
+          <div style="font-family:'Space Grotesk',sans-serif;font-size:18px;font-weight:700;" id="modalAmount"></div>
+        </div>
+        <div style="background:#111;border:1px solid #27272a;border-radius:10px;padding:14px;">
+          <div style="font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Payment By</div>
+          <div style="font-size:14px;font-weight:600;color:var(--t1);" id="modalDate"></div>
+        </div>
+      </div>
+
+      <!-- Recording -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <span style="font-size:12px;font-weight:600;color:var(--t2);">Call Recording</span>
+        <a id="recBtn" class="rec-btn rec-demo" onclick="return false;">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>
+          <span id="recBtnLabel">Demo — No Recording</span>
+        </a>
+      </div>
+
+      <!-- Transcript -->
+      <div style="font-size:12px;font-weight:600;color:var(--t2);margin-bottom:6px;">Call Transcript</div>
+      <div class="transcript" id="modalTranscript"></div>
+
+      <!-- NCA note -->
+      <div style="margin-top:14px;padding:10px 12px;background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.12);border-radius:8px;font-size:11px;color:var(--t3);">
+        ✓ NCA compliant · AI identified itself as Novaux AI assistant · Debtor offered right to dispute · Call conducted within permitted hours
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let debtors = [];
+let demoMode = true;
+let chasing = false;
+let outcomes = {};   // id → outcome object
+let clientName = 'Novaux Demo Co';
+
+// ── Mode toggle ──
+function toggleMode() {
+  demoMode = !demoMode;
+  const chip = document.getElementById('modeChip');
+  const dot  = document.getElementById('modeDot');
+  const lbl  = document.getElementById('modeLabel');
+  chip.className = 'mode-chip ' + (demoMode ? 'demo' : 'live');
+  dot.className  = 'mode-dot' + (demoMode ? '' : ' blink');
+  lbl.textContent = demoMode ? 'Demo' : 'Live';
+}
+
+// ── Upload ──
+function triggerUpload() { document.getElementById('fileInput').value = ''; document.getElementById('fileInput').click(); }
+function handleFile(el) { if (el.files[0]) { const fd = new FormData(); fd.append('file', el.files[0]); fetch('/api/upload',{method:'POST',body:fd}).then(r=>r.json()).then(renderData); } }
+function loadDemo() { fetch('/api/demo-data').then(r=>r.json()).then(renderData); }
+
+// ── Render table ──
+function renderData(data) {
+  if (data.error) { alert(data.error); return; }
+  debtors = data.debtors;
+  outcomes = {};
+  paid = {};
+  clientName = document.getElementById('clientInput').value || 'Your Company';
+
+  document.getElementById('kpiOwed').textContent     = fmt(data.total_owed);
+  document.getElementById('kpiOwedSub').textContent  = `Across ${data.count} accounts`;
+  document.getElementById('kpiCount').textContent    = data.count;
+  document.getElementById('kpiRecovery').textContent = fmt(data.est_recovery);
+  document.getElementById('kpiCommitted').textContent = '—';
+  document.getElementById('kpiCommittedSub').textContent = 'After chase completes';
+
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('tableWrap').style.display  = '';
+  document.getElementById('tblSub').textContent = `${data.count} accounts · sorted by priority score`;
+  document.getElementById('doneChip').style.display   = 'none';
+  document.getElementById('progPanel').style.display  = 'none';
+
+  const maxScore = Math.max(...debtors.map(d => d._score));
+  const tbody = document.getElementById('accountTable');
+  tbody.innerHTML = '';
+  debtors.forEach((d, i) => {
+    const tr = document.createElement('tr');
+    tr.id = 'row-' + d._id;
+    tr.onclick = () => openModal(d._id);
+    const ovCol = d.days_overdue > 90 ? '#ef4444' : d.days_overdue > 45 ? '#eab308' : '#71717a';
+    const pct   = Math.round(d._score / maxScore * 100);
+    tr.innerHTML = `
+      <td style="color:#52525b;font-size:11px;font-family:'Courier New',monospace;">${String(i+1).padStart(2,'0')}</td>
+      <td>
+        <div style="font-weight:600;font-size:13px;color:#f4f4f5;">${d.account_name}</div>
+        <div style="font-size:11px;color:#52525b;font-family:'Courier New',monospace;margin-top:2px;">${d.invoice_ref||'—'}</div>
+      </td>
+      <td>
+        <div style="font-size:13px;color:#a1a1aa;">${d.contact_name}</div>
+        <div style="font-size:11px;color:#3f3f46;margin-top:1px;">${d.phone}</div>
+      </td>
+      <td style="text-align:right;">
+        <div style="font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:700;color:#f4f4f5;">${fmt(d.amount_owed)}</div>
+      </td>
+      <td>
+        <div style="display:flex;align-items:center;gap:7px;">
+          <span style="font-size:12px;font-weight:700;color:${ovCol};">${d.days_overdue}d</span>
+          <span class="ov-track"><span class="ov-fill" style="width:${Math.min(d.days_overdue/180*100,100)}%;background:${ovCol};"></span></span>
+        </div>
+      </td>
+      <td style="text-align:right;">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;">
+          <div style="width:40px;height:3px;background:#27272a;border-radius:99px;overflow:hidden;"><div style="width:${pct}%;height:100%;background:#3b82f6;border-radius:99px;"></div></div>
+          <span style="font-size:11px;color:#52525b;font-family:'Courier New',monospace;">${pct}</span>
+        </div>
+      </td>
+      <td style="text-align:center;"><span id="badge-${d._id}" class="badge b-queued">Queued</span></td>
+      <td id="outcome-${d._id}" style="font-size:11px;color:#52525b;">—</td>
+      <td id="committed-${d._id}" style="text-align:right;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;color:#22c55e;">—</td>
+      <td style="text-align:center;" id="pay-${d._id}">—</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  // Reset chase button
+  chasing = false;
+  document.getElementById('chaseBtn').disabled = false;
+  document.getElementById('chaseLbl').textContent = 'Launch Chase';
+}
+
+// ── Chase ──
+function startChase() {
+  if (chasing || !debtors.length) return;
+  chasing = true;
+  outcomes = {};
+  clientName = document.getElementById('clientInput').value || 'Your Company';
+
+  document.getElementById('chaseBtn').disabled = true;
+  document.getElementById('chaseLbl').textContent = 'Running...';
+  document.getElementById('progPanel').style.display = '';
+  document.getElementById('progTitle').textContent = `Chasing ${debtors.length} accounts — ${clientName}`;
+  document.getElementById('feed').innerHTML = '';
+  document.getElementById('kpiCommitted').textContent = '—';
+  document.getElementById('kpiCommittedSub').textContent = 'Chase in progress...';
+
+  // Reset all row badges
+  debtors.forEach(d => {
+    const b = document.getElementById('badge-' + d._id);
+    const o = document.getElementById('outcome-' + d._id);
+    const c = document.getElementById('committed-' + d._id);
+    if (b) { b.className = 'badge b-queued'; b.textContent = 'Queued'; }
+    if (o) o.textContent = '—';
+    if (c) c.textContent = '—';
+    const tr = document.getElementById('row-' + d._id);
+    if (tr) tr.className = '';
+  });
+  document.getElementById('doneChip').style.display = 'none';
+
+  log('dim', `Initialising · ${debtors.length} accounts · ${demoMode ? 'demo mode' : 'live mode'}`);
+
+  fetch('/api/chase', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ debtors, client_company: clientName, demo_mode: demoMode, report_email: document.getElementById('reportEmail').value }),
+  }).then(r => r.json()).then(d => {
+    if (d.error) { alert(d.error); endChase(); return; }
+    listenStream(d.session_id);
+  }).catch(() => endChase());
+}
+
+function listenStream(sid) {
+  const es = new EventSource('/api/stream/' + sid);
+  let totalCommitted = 0;
+
+  es.onmessage = e => {
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === 'update') {
+      const badge = document.getElementById('badge-' + msg.id);
+      const row   = document.getElementById('row-'   + msg.id);
+      if (badge) { badge.className = 'badge ' + bc(msg.status); badge.textContent = bl(msg.status); }
+      if (row)   row.className = msg.status === 'contacted' ? 'row-success' : ['calling','emailing','scoring'].includes(msg.status) ? 'row-active' : '';
+
+      // On contacted → generate outcome
+      if (msg.status === 'contacted') {
+        const debtor = debtors.find(d => d._id === msg.id);
+        if (debtor) {
+          const outcome = genOutcome(debtor);
+          outcomes[msg.id] = outcome;
+          setOutcomeInRow(msg.id, outcome);
+          if (outcome.amount > 0) { totalCommitted += outcome.amount; updateCommittedKpi(totalCommitted); }
+        }
+      }
+
+      const acct = debtors.find(d => d._id === msg.id);
+      log(msg.status === 'contacted' ? 'ok' : msg.status === 'call_failed' ? 'err' : 'info',
+          `${msg.detail || msg.status}${acct ? ' — ' + acct.account_name : ''}`);
+    }
+
+    if (msg.type === 'progress') {
+      const pct = msg.total > 0 ? msg.contacted / msg.total * 100 : 0;
+      document.getElementById('progFill').style.width = pct + '%';
+      document.getElementById('progLbl').textContent = `${msg.contacted} / ${msg.total} contacted`;
+    }
+
+    if (msg.type === 'done') {
+      es.close();
+      endChase();
+      document.getElementById('progTitle').textContent = `Complete — ${msg.contacted}/${msg.total} accounts contacted`;
+      document.getElementById('doneChip').style.display = '';
+      log('ok', `Chase complete · ${msg.contacted}/${msg.total} contacted · ${fmt(msg.total_owed)} outstanding`);
+    }
+  };
+  es.onerror = () => { log('err', 'Stream disconnected'); es.close(); endChase(); };
+}
+
+function endChase() {
+  chasing = false;
+  document.getElementById('chaseBtn').disabled = false;
+  document.getElementById('chaseLbl').textContent = 'Run Again';
+}
+
+function updateCommittedKpi(total) {
+  document.getElementById('kpiCommitted').textContent = fmt(total);
+  const promises = Object.values(outcomes).filter(o => o.amount > 0).length;
+  document.getElementById('kpiCommittedSub').textContent = `${promises} payment promise${promises !== 1 ? 's' : ''} received`;
+}
+
+// ── Outcome generation (demo mode) ──
+const OUTCOMES = [
+  { w:40, type:'promise_to_pay',  label:'Promise to Pay',    cls:'out-promise'   },
+  { w:22, type:'arrangement',     label:'Payment Plan',      cls:'out-plan'       },
+  { w:20, type:'voicemail',       label:'Voicemail Left',    cls:'out-voicemail'  },
+  { w:12, type:'no_answer',       label:'No Answer',         cls:'out-no-answer'  },
+  { w:6,  type:'dispute',         label:'Disputed',          cls:'out-dispute'    },
+];
+
+function genOutcome(debtor) {
+  const seed = debtor._id.charCodeAt(0) + debtor._id.charCodeAt(1);
+  const roll = seed % 100;
+  let cum = 0;
+  let chosen = OUTCOMES[0];
+  for (const o of OUTCOMES) { cum += o.w; if (roll < cum) { chosen = o; break; } }
+
+  const daysOut = 14 + (seed % 21);
+  const future = new Date(Date.now() + daysOut * 86400000);
+  const dateStr = future.toLocaleDateString('en-ZA', { day:'numeric', month:'short', year:'numeric' });
+
+  let amount = 0;
+  if (chosen.type === 'promise_to_pay') amount = debtor.amount_owed;
+  else if (chosen.type === 'arrangement') amount = Math.round(debtor.amount_owed / 3);
+
+  return { ...chosen, amount, date: chosen.amount > 0 ? dateStr : null, debtor };
+}
+
+let paid = {};  // id → true
+
+function setOutcomeInRow(id, outcome) {
+  const oEl = document.getElementById('outcome-' + id);
+  const cEl = document.getElementById('committed-' + id);
+  const pEl = document.getElementById('pay-' + id);
+  if (oEl) oEl.innerHTML = `<span class="badge ${outcome.cls}">${outcome.label}</span>`;
+  if (cEl) {
+    if (outcome.amount > 0) {
+      cEl.textContent = fmt(outcome.amount);
+      cEl.style.color = outcome.type === 'arrangement' ? '#60a5fa' : '#22c55e';
+    } else {
+      cEl.textContent = '—';
+      cEl.style.color = '#52525b';
+    }
+  }
+  if (pEl) {
+    if (paid[id]) {
+      pEl.innerHTML = `<span class="badge" style="background:rgba(34,197,94,.12);color:#22c55e;">Paid ✓</span>`;
+    } else if (outcome.amount > 0) {
+      pEl.innerHTML = `<button onclick="markPaid(event,'${id}')" style="font-size:10px;font-weight:600;padding:3px 9px;border-radius:6px;border:1px solid #27272a;background:#1a1a1a;color:#a1a1aa;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='#22c55e';this.style.color='#22c55e';" onmouseout="this.style.borderColor='#27272a';this.style.color='#a1a1aa';">Mark Paid</button>`;
+    } else {
+      pEl.innerHTML = `<span style="font-size:11px;color:#3f3f46;">—</span>`;
+    }
+  }
+}
+
+function markPaid(event, id) {
+  event.stopPropagation();
+  paid[id] = true;
+  const outcome = outcomes[id];
+  const debtor  = debtors.find(d => d._id === id);
+  if (outcome) setOutcomeInRow(id, outcome);
+  const row = document.getElementById('row-' + id);
+  if (row) row.className = 'row-success';
+  // Update 4th KPI to show recovered
+  const recoveredCount = Object.keys(paid).length;
+  const recoveredTotal = Object.keys(paid).reduce((sum, pid) => {
+    return sum + (outcomes[pid] ? outcomes[pid].amount : 0);
+  }, 0);
+  document.getElementById('kpiCommitted').textContent = fmt(recoveredTotal);
+  document.getElementById('kpiCommittedSub').textContent = `${recoveredCount} payment${recoveredCount !== 1 ? 's' : ''} confirmed`;
+  if (debtor) log('ok', `Payment confirmed — ${debtor.account_name} · ${fmt(outcome ? outcome.amount : 0)}`);
+}
+
+// ── Modal ──
+function openModal(id) {
+  const debtor  = debtors.find(d => d._id === id);
+  if (!debtor) return;
+  const outcome = outcomes[id];
+  const hasChased = !!outcome;
+
+  document.getElementById('modalTitle').textContent = debtor.account_name;
+  document.getElementById('modalSub').textContent   = `${debtor.contact_name} · ${debtor.phone} · ${fmt(debtor.amount_owed)} outstanding`;
+
+  if (hasChased) {
+    document.getElementById('modalOutcomeBadge').innerHTML = `<span class="badge ${outcome.cls}" style="font-size:12px;padding:4px 10px;">${outcome.label}</span>`;
+    document.getElementById('modalAmount').textContent = outcome.amount > 0 ? fmt(outcome.amount) + (outcome.type === 'arrangement' ? '/mo' : '') : 'N/A';
+    document.getElementById('modalAmount').style.color = outcome.amount > 0 ? '#22c55e' : '#71717a';
+    document.getElementById('modalDate').textContent   = outcome.date || '—';
+    document.getElementById('modalTranscript').innerHTML = buildTranscript(debtor, outcome);
+
+    const btn = document.getElementById('recBtn');
+    const lbl = document.getElementById('recBtnLabel');
+    if (demoMode) {
+      btn.className = 'rec-btn rec-demo';
+      btn.href = '#';
+      lbl.textContent = 'Demo — No Recording';
+    } else {
+      btn.className = 'rec-btn rec-live';
+      btn.href = '#';
+      lbl.textContent = '🔴 Play Recording';
+    }
+  } else {
+    document.getElementById('modalOutcomeBadge').innerHTML = `<span class="badge b-queued" style="font-size:12px;padding:4px 10px;">Not yet chased</span>`;
+    document.getElementById('modalAmount').textContent = '—';
+    document.getElementById('modalAmount').style.color = '#71717a';
+    document.getElementById('modalDate').textContent = '—';
+    document.getElementById('modalTranscript').innerHTML = `<span style="color:#52525b;">Run a chase first to see the call transcript.</span>`;
+    document.getElementById('recBtn').className = 'rec-btn rec-demo';
+    document.getElementById('recBtnLabel').textContent = 'No recording yet';
+  }
+
+  document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('modalOverlay')) {
+    document.getElementById('modalOverlay').style.display = 'none';
+  }
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+function buildTranscript(debtor, outcome) {
+  const first = debtor.contact_name.split(' ')[0];
+  const amtStr = fmt(debtor.amount_owed);
+  const client = clientName;
+
+  const lines = {
+    promise_to_pay: [
+      ['ai',    `Ava: Hi, could I speak to ${first}? — Great. I'm Ava, an AI assistant from Novaux calling on behalf of ${client} about an outstanding balance of ${amtStr} on account reference ${debtor.invoice_ref || 'on account'}.`],
+      ['human', `${first}: Yes — I'm aware of that. I've been meaning to get to it.`],
+      ['ai',    `Ava: Appreciate that. Would you be able to settle the full amount, or would a payment arrangement work better for you?`],
+      ['human', `${first}: I can do the full amount. Give me until ${outcome.date}.`],
+      ['ai',    `Ava: Perfect. I'm noting ${amtStr} in full by ${outcome.date}. ${client} will follow up if it hasn't cleared by then. Thank you, ${first}.`],
+      ['human', `${first}: Sounds good. Thanks.`],
+    ],
+    arrangement: [
+      ['ai',    `Ava: Hi ${first}, I'm Ava from Novaux calling on behalf of ${client} regarding ${amtStr} outstanding on ${debtor.invoice_ref || 'your account'}.`],
+      ['human', `${first}: Look, I can't pay it all at once right now. Things are tight.`],
+      ['ai',    `Ava: Understood. What could you commit to monthly, and over how many months?`],
+      ['human', `${first}: I can do ${fmt(outcome.amount)} a month over three months.`],
+      ['ai',    `Ava: I'm noting that — ${fmt(outcome.amount)}/month for 3 months starting ${outcome.date}. ${client} will confirm this arrangement in writing. Thank you.`],
+    ],
+    voicemail: [
+      ['ai',    `Ava: [Calling ${debtor.phone}...]`],
+      ['human', `[Rings 4 times — no answer — voicemail]`],
+      ['ai',    `Ava: Hi, this is a message for ${first} from Novaux calling on behalf of ${client} regarding an outstanding account of ${amtStr}. Please call ${client} at your earliest convenience. Thank you.`],
+    ],
+    no_answer: [
+      ['ai',    `Ava: [Calling ${debtor.phone}...]`],
+      ['human', `[Rings out — no answer — no voicemail available]`],
+      ['ai',    `[System: Call flagged for callback attempt in 48 hours]`],
+    ],
+    dispute: [
+      ['ai',    `Ava: Hi ${first}, calling on behalf of ${client} about ${amtStr} outstanding on ${debtor.invoice_ref || 'your account'}.`],
+      ['human', `${first}: That invoice is incorrect. We don't owe that amount.`],
+      ['ai',    `Ava: Understood — I'm flagging this as disputed and someone from ${client} will contact you within 2 business days to go through the details. Is this the best number to reach you on?`],
+      ['human', `${first}: Yes, this number is fine.`],
+      ['ai',    `Ava: Thank you ${first}. The dispute has been logged. ${client} will follow up shortly.`],
+    ],
+  };
+
+  const script = lines[outcome.type] || lines.voicemail;
+  return script.map(([role, text]) =>
+    `<div class="${role === 'ai' ? 'ai' : 'human'}" style="margin-bottom:8px;">${text}</div>`
+  ).join('');
+}
+
+// ── Helpers ──
+function bc(s) {
+  return {idle:'b-queued',scoring:'b-scoring',emailing:'b-emailing',
+          email_sent:'b-emailed',email_skipped:'b-skipped',
+          calling:'b-calling',contacted:'b-called',call_failed:'b-failed'}[s]||'b-queued';
+}
+function bl(s) {
+  return {idle:'Queued',scoring:'Scoring…',emailing:'Emailing…',
+          email_sent:'Email ✓',email_skipped:'No Email',
+          calling:'Calling…',contacted:'Contacted ✓',call_failed:'Failed'}[s]||s;
+}
+function log(type, msg) {
+  const feed = document.getElementById('feed');
+  const ts   = new Date().toTimeString().slice(0,8);
+  const el   = document.createElement('div');
+  el.className = `feed-line ${type} slide-up`;
+  el.innerHTML = `<span class="feed-ts">${ts}</span><span class="feed-msg">${msg}</span>`;
+  feed.appendChild(el);
+  feed.scrollTop = feed.scrollHeight;
+}
+function fmt(n) {
+  if (!n && n !== 0) return '—';
+  return 'R' + Math.round(n).toLocaleString('en-ZA');
+}
+</script>
+</body>
+</html>

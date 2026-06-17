@@ -1,0 +1,13 @@
+account_name,contact_name,phone,email,amount_owed,days_overdue,invoice_ref,language
+Mthembu Construction (Pty) Ltd,Sipho Mthembu,+27821234501,matshiyane.l1@gmail.com,385000,92,INV-2025-0441,zu
+Patel & Sons Wholesalers,Raj Patel,+27831234502,raj@patelsons.co.za,214500,67,INV-2025-0388,en
+Botha Agri Supplies,Francois Botha,+27841234503,francois@bothaagri.co.za,178200,45,INV-2025-0412,af
+Ndlovu Transport Solutions,Thandi Ndlovu,+27851234504,thandi@ndloutransport.co.za,156000,110,INV-2025-0359,zu
+Cape Steel Distributors,Mark van der Berg,+27861234505,mark@capesteel.co.za,143750,38,INV-2025-0433,af
+Khumalo Media Group,Zanele Khumalo,+27711234506,zanele@khumalomedia.co.za,98400,55,INV-2025-0401,en
+Dlamini Office Supplies,Lungelo Dlamini,+27721234507,lungelo@dlaminisupplies.co.za,87600,78,INV-2025-0376,zu
+Pretoria Plumbing Services,Johan du Plessis,+27731234508,johan@pretoriaplumbing.co.za,74300,33,INV-2025-0447,af
+Sithole Logistics CC,Bongani Sithole,+27741234509,bongani@sitholelogistics.co.za,62100,140,INV-2025-0312,en
+Mokwena Civil Engineering,Tebogo Mokwena,+27751234510,tebogo@mokwenacivil.co.za,54800,29,INV-2025-0461,en
+Hassan Trading Enterprise,Fatima Hassan,+27761234511,fatima@hassantrading.co.za,43200,88,INV-2025-0368,en
+Steyn Electrical Contractors,Pieter Steyn,+27771234512,pieter@steynelectrical.co.za,31500,52,INV-2025-0419,af
