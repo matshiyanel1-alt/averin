@@ -316,6 +316,9 @@ input.tb-input:focus { border-color:rgba(59,130,246,.4); color:var(--t1); }
           </div>
           <div style="display:flex;align-items:center;gap:10px;">
             <span style="font-size:12px;color:var(--t3);" id="tblSub"></span>
+            <button id="rechaseBtn" onclick="startRechase()" style="display:none;font-size:11px;font-weight:600;padding:5px 12px;border-radius:7px;border:1px solid rgba(234,179,8,.3);background:rgba(234,179,8,.08);color:#eab308;cursor:pointer;">
+              ↻ Re-Chase Unresolved (<span id="rechaseCount">0</span>)
+            </button>
             <div class="done-chip" id="doneChip" style="display:none;">
               <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
               Chase complete
@@ -760,7 +763,7 @@ function listenStream(sid) {
       if (msg.status === 'contacted') {
         const debtor = debtors.find(d => d._id === msg.id);
         if (debtor) {
-          const outcome = genOutcome(debtor);
+          const outcome = genOutcome(debtor, msg.round2);
           outcomes[msg.id] = outcome;
           setOutcomeInRow(msg.id, outcome);
           if (outcome.amount > 0) { totalCommitted += outcome.amount; updateCommittedKpi(totalCommitted); }
@@ -793,6 +796,58 @@ function endChase() {
   chasing = false;
   document.getElementById('chaseBtn').disabled = false;
   document.getElementById('chaseLbl').textContent = 'Run Again';
+
+  // Show re-chase button for unresolved accounts
+  const unresolved = debtors.filter(d => {
+    const o = outcomes[d._id];
+    return !o || ['voicemail','no_answer'].includes(o.type);
+  });
+  if (unresolved.length > 0) {
+    document.getElementById('rechaseCount').textContent = unresolved.length;
+    document.getElementById('rechaseBtn').style.display = '';
+  }
+}
+
+function startRechase() {
+  if (chasing || !debtors.length) return;
+  const unresolved = debtors.filter(d => {
+    const o = outcomes[d._id];
+    return !o || ['voicemail','no_answer'].includes(o.type);
+  });
+  if (!unresolved.length) return;
+
+  chasing = true;
+  document.getElementById('rechaseBtn').style.display = 'none';
+  document.getElementById('chaseBtn').disabled = true;
+  document.getElementById('chaseLbl').textContent = 'Running...';
+  document.getElementById('progPanel').style.display = '';
+  document.getElementById('progTitle').textContent = `Round 2 — Re-chasing ${unresolved.length} unresolved accounts`;
+  document.getElementById('feed').innerHTML = '';
+
+  // Flash unresolved rows amber
+  unresolved.forEach(d => {
+    const b = document.getElementById('badge-' + d._id);
+    if (b) { b.className = 'badge b-queued'; b.textContent = 'Round 2'; }
+    const tr = document.getElementById('row-' + d._id);
+    if (tr) tr.className = 'row-active';
+  });
+
+  log('dim', `Round 2 initiated · ${unresolved.length} accounts · escalated script`);
+
+  fetch('/api/chase', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      debtors: unresolved,
+      client_company: clientName,
+      demo_mode: demoMode,
+      report_email: document.getElementById('reportEmail').value,
+      escalate: true
+    }),
+  }).then(r => r.json()).then(d => {
+    if (d.error) { alert(d.error); endChase(); return; }
+    listenStream(d.session_id);
+  }).catch(() => endChase());
 }
 
 function updateCommittedKpi(total) {
@@ -810,12 +865,20 @@ const OUTCOMES = [
   { w:6,  type:'dispute',         label:'Disputed',          cls:'out-dispute'    },
 ];
 
-function genOutcome(debtor) {
-  const seed = debtor._id.charCodeAt(0) + debtor._id.charCodeAt(1);
+function genOutcome(debtor, round2 = false) {
+  const seed = debtor._id.charCodeAt(0) + debtor._id.charCodeAt(1) + (round2 ? 37 : 0);
   const roll = seed % 100;
+  // Round 2 has higher promise rate — fewer voicemails
+  const ROUND2_OUTCOMES = [
+    { w:55, type:'promise_to_pay', label:'Promise to Pay',  cls:'out-promise'  },
+    { w:25, type:'arrangement',    label:'Payment Plan',    cls:'out-plan'     },
+    { w:12, type:'voicemail',      label:'Voicemail Left',  cls:'out-voicemail'},
+    { w:8,  type:'no_answer',      label:'No Answer',       cls:'out-no-answer'},
+  ];
+  const pool = round2 ? ROUND2_OUTCOMES : OUTCOMES;
   let cum = 0;
-  let chosen = OUTCOMES[0];
-  for (const o of OUTCOMES) { cum += o.w; if (roll < cum) { chosen = o; break; } }
+  let chosen = pool[0];
+  for (const o of pool) { cum += o.w; if (roll < cum) { chosen = o; break; } }
 
   const daysOut = 14 + (seed % 21);
   const future = new Date(Date.now() + daysOut * 86400000);
@@ -825,7 +888,7 @@ function genOutcome(debtor) {
   if (chosen.type === 'promise_to_pay') amount = debtor.amount_owed;
   else if (chosen.type === 'arrangement') amount = Math.round(debtor.amount_owed / 3);
 
-  return { ...chosen, amount, date: chosen.amount > 0 ? dateStr : null, debtor };
+  return { ...chosen, amount, date: chosen.amount > 0 ? dateStr : null, debtor, round2 };
 }
 
 let paid = {};  // id → true

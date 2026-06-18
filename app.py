@@ -139,15 +139,34 @@ def send_email(to, subject, body_html, body_plain=None):
         return False, str(e)
 
 
-def debtor_email_body(contact_name, account_name, amount_owed, invoice_ref, client_company):
+def debtor_email_body(contact_name, account_name, amount_owed, invoice_ref, client_company, escalate=False):
     amount_fmt = f"R{float(amount_owed):,.0f}"
     ref = invoice_ref or "on account"
-    return f"""
-<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;background:#fff;">
-  <div style="margin-bottom:28px;">
-    <p style="font-size:12px;color:#71717a;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">From {client_company}</p>
-    <h2 style="font-size:20px;font-weight:700;color:#111;margin:0;">Outstanding Account Notice</h2>
-  </div>
+    if escalate:
+        header_color = "#dc2626"
+        subject_line = "Final Notice — Immediate Payment Required"
+        urgency_bar = f"""
+  <div style="background:#fef2f2;border-left:3px solid #dc2626;padding:16px 20px;border-radius:0 8px 8px 0;margin:24px 0;">
+    <div style="font-size:11px;font-weight:700;color:#dc2626;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Second Notice</div>
+    <div style="font-size:26px;font-weight:700;color:#111;">{amount_fmt}</div>
+    <div style="font-size:13px;color:#6b7280;margin-top:4px;">Reference: {ref} · Immediate action required</div>
+  </div>"""
+        body_text = f"""
+  <p style="font-size:15px;color:#374151;line-height:1.6;">Dear {contact_name},</p>
+  <p style="font-size:15px;color:#374151;line-height:1.6;margin-top:12px;">
+    We were unable to reach you regarding the outstanding balance of
+    <strong style="color:#111;">{amount_fmt}</strong> on account <strong style="color:#111;">{ref}</strong>.
+    This is our second and final automated notice.
+  </p>
+  {urgency_bar}
+  <p style="font-size:15px;color:#374151;line-height:1.6;">
+    Please settle this account within <strong>48 hours</strong> to avoid escalation to our collections team.
+    If you have already paid or wish to arrange a payment plan, reply to this email immediately.
+  </p>"""
+    else:
+        header_color = "#3b82f6"
+        subject_line = "Outstanding Account Notice"
+        body_text = f"""
   <p style="font-size:15px;color:#374151;line-height:1.6;">Dear {contact_name},</p>
   <p style="font-size:15px;color:#374151;line-height:1.6;margin-top:12px;">
     This is a courtesy notice regarding an outstanding balance of
@@ -165,20 +184,43 @@ def debtor_email_body(contact_name, account_name, amount_owed, invoice_ref, clie
   </p>
   <p style="font-size:15px;color:#374151;line-height:1.6;margin-top:16px;">
     If you've already settled this amount, please disregard this notice.
-  </p>
+  </p>"""
+
+    return f"""
+<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;background:#fff;">
+  <div style="margin-bottom:28px;">
+    <p style="font-size:12px;color:#71717a;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">From {client_company}</p>
+    <h2 style="font-size:20px;font-weight:700;color:#111;margin:0;">{subject_line}</h2>
+  </div>
+  {body_text}
   <div style="margin-top:32px;padding-top:20px;border-top:1px solid #e5e7eb;">
     <p style="font-size:13px;color:#9ca3af;">
       Sent by <strong>Novaux AI</strong> on behalf of {client_company} ·
-      To opt out of automated follow-ups, reply with "OPT OUT" ·
-      NCA compliant
+      To opt out, reply with "OPT OUT" · NCA compliant
     </p>
   </div>
 </div>"""
 
 
-def build_call_prompt(contact_name, account_name, amount_owed, invoice_ref, client_company):
+def build_call_prompt(contact_name, account_name, amount_owed, invoice_ref, client_company, escalate=False):
     amt = f"R{float(amount_owed):,.0f}"
     ref = invoice_ref or "on account"
+    if escalate:
+        return f"""You are an AI assistant making a second and final call on behalf of {client_company}. Firm, direct, but still professional.
+
+NCA COMPLIANCE — MANDATORY:
+- Identify yourself as an AI assistant from Novaux, calling on behalf of {client_company}, in your first sentence.
+- State this is a second attempt. Do not threaten legal action directly, but make clear this is the final automated contact before escalation.
+
+OPENING: "Hi, could I speak to {contact_name}? — I'm Ava from Novaux calling on behalf of {client_company}. This is our second attempt regarding {amt} outstanding on {ref}. We need to resolve this today to avoid escalation to our collections team."
+
+IF THEY CONFIRM AND WANT TO PAY: Get specific date — must be within 5 days. Confirm and note urgency.
+IF INSTALMENTS: Accept only if first payment is within 48 hours.
+IF DISPUTE: Flag immediately, say a human from {client_company} will call within 24 hours.
+IF VOICEMAIL: "Final notice for {contact_name} from Novaux on behalf of {client_company}. {amt} is outstanding on {ref}. Please contact {client_company} within 48 hours to avoid further action."
+IF DON'T CALL AGAIN: Acknowledge, but inform that {client_company} will follow up directly.
+
+TONE: Firm, urgent, professional. This is the last automated contact."""
     return f"""You are an AI assistant calling on behalf of {client_company}. Professional, calm, direct. Payment follow-up — not aggressive.
 
 NCA COMPLIANCE — MANDATORY:
@@ -196,7 +238,7 @@ IF DON'T CALL AGAIN: Acknowledge and end professionally.
 TONE: Calm, factual, non-confrontational."""
 
 
-def dispatch_call(row, client_company):
+def dispatch_call(row, client_company, escalate=False):
     phone = row.get("phone", "").strip()
     if not phone.startswith("+27"):
         return None, f"invalid phone: {phone}"
@@ -204,7 +246,7 @@ def dispatch_call(row, client_company):
     payload = {
         "phone_number": phone,
         "task": build_call_prompt(row["contact_name"], row["account_name"],
-                                   row["amount_owed"], row.get("invoice_ref",""), client_company),
+                                   row["amount_owed"], row.get("invoice_ref",""), client_company, escalate=escalate),
         "language": lang, "max_duration": 300, "wait_for_greeting": True, "record": True,
         "analysis_schema": {
             "outcome": {"type":"string","description":"promise_to_pay, dispute, callback_requested, no_answer, voicemail, wrong_number, refused, payment_arrangement"},
@@ -303,7 +345,7 @@ def sse_event(data):
     return f"data: {json.dumps(data)}\n\n"
 
 
-def run_chase(session_id, debtors, client_company, demo_mode, report_email=None):
+def run_chase(session_id, debtors, client_company, demo_mode, report_email=None, escalate=False):
     q = SESSIONS[session_id]["queue"]
 
     def emit(d):
@@ -324,16 +366,13 @@ def run_chase(session_id, debtors, client_company, demo_mode, report_email=None)
         time.sleep(0.4 if demo_mode else 0.1)
 
         # Email
-        emit({"type":"update","id":did,"status":"emailing","detail":"Sending personalised email..."})
+        emit({"type":"update","id":did,"status":"emailing","detail":f"Sending {'final notice' if escalate else 'personalised email'}..."})
         to_email = debtor.get("email","")
         if to_email:
             body = debtor_email_body(debtor["contact_name"], debtor["account_name"],
-                                     amount, debtor.get("invoice_ref",""), client_company)
-            email_ok, email_msg = send_email(
-                to_email,
-                f"Outstanding Account — {debtor['account_name']}",
-                body
-            )
+                                     amount, debtor.get("invoice_ref",""), client_company, escalate=escalate)
+            subject = f"Final Notice — {debtor['account_name']}" if escalate else f"Outstanding Account — {debtor['account_name']}"
+            email_ok, email_msg = send_email(to_email, subject, body)
         else:
             email_ok, email_msg = False, "no email on record"
 
@@ -346,7 +385,7 @@ def run_chase(session_id, debtors, client_company, demo_mode, report_email=None)
         emit({"type":"update","id":did,"status":"calling","detail":"Dispatching AI call..."})
         time.sleep(0.8 if demo_mode else 0.1)
 
-        call_id, call_err = dispatch_call(debtor, client_company)
+        call_id, call_err = dispatch_call(debtor, client_company, escalate=escalate)
         call_ok = call_id is not None
 
         if not call_ok and demo_mode:
@@ -357,8 +396,8 @@ def run_chase(session_id, debtors, client_company, demo_mode, report_email=None)
         if call_ok:
             contacted += 1
             emit({"type":"update","id":did,"status":"contacted",
-                  "detail": f"AI call live{' (demo)' if demo_mode and (call_id or '').startswith('demo-') else ''}",
-                  "call_id": call_id})
+                  "detail": f"{'Round 2 — ' if escalate else ''}AI call live{' (demo)' if demo_mode and (call_id or '').startswith('demo-') else ''}",
+                  "call_id": call_id, "round2": escalate})
         else:
             emit({"type":"update","id":did,"status":"call_failed","detail":f"Call failed: {call_err}"})
 
@@ -441,11 +480,12 @@ def start_chase():
     client       = body.get("client_company", "Your Company")
     demo_mode    = body.get("demo_mode", True)
     report_email = body.get("report_email", "")
+    escalate     = body.get("escalate", False)
     if not debtors:
         return jsonify({"error":"No debtors"}), 400
     sid = uuid.uuid4().hex
     SESSIONS[sid] = {"queue": Queue(), "done": False}
-    t = threading.Thread(target=run_chase, args=(sid, debtors, client, demo_mode, report_email or None), daemon=True)
+    t = threading.Thread(target=run_chase, args=(sid, debtors, client, demo_mode, report_email or None, escalate), daemon=True)
     t.start()
     return jsonify({"session_id": sid})
 
