@@ -109,7 +109,9 @@ def logout():
 @app.route("/")
 @login_required
 def index():
-    return send_from_directory(str(STATIC), "ar_chase_dashboard.html")
+    resp = send_from_directory(str(STATIC), "ar_chase_dashboard.html")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return resp
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
