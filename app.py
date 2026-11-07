@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Novaux AR Chase — Production App
+Averin — Accounts Receivable Software
 Deployed on Railway. Handles login, CSV upload, live chase, and post-chase report emails.
 """
 
@@ -26,14 +26,86 @@ BLAND_HEADERS = {"authorization": BLAND_API_KEY, "Content-Type": "application/js
 BLAND_BASE    = "https://api.bland.ai/v1"
 
 RESEND_API_KEY  = os.getenv("RESEND_API_KEY", "")
-RESEND_FROM     = os.getenv("RESEND_FROM", "Novaux AR Chase <onboarding@resend.dev>")
+# The client is the sender. Averin never appears in debtor-facing mail.
+# In production each client supplies a verified sending domain; RESEND_SENDER_DOMAIN
+# is the fallback address used until theirs is verified.
+RESEND_SENDER_DOMAIN = os.getenv("RESEND_SENDER_DOMAIN", "onboarding@resend.dev")
 
-DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "novaux2026")
+
+def sender_for(client_company):
+    """Build the From header so the debtor sees the client, never Averin."""
+    name = (client_company or "Accounts").replace('"', "").strip()
+    return f"{name} <{RESEND_SENDER_DOMAIN}>"
+
+# Business-initiated WhatsApp needs prior opt-in and a Meta-approved template.
+# Until a client can evidence both, this stays off and the channel is skipped.
+WHATSAPP_ENABLED = os.getenv("WHATSAPP_ENABLED", "false").lower() == "true"
+
+TWILIO_SID      = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_TOKEN    = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_WA_FROM  = os.getenv("TWILIO_WHATSAPP_FROM", "")  # e.g. whatsapp:+14155238886
+
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "averin2026")
 
 app = Flask(__name__, static_folder=str(STATIC), static_url_path="/static")
 app.secret_key = os.getenv("FLASK_SECRET", uuid.uuid4().hex)
 
 SESSIONS: dict = {}
+
+# ── Do-not-contact list ──────────────────────────────────────────────
+# NOTE: file-backed, so it does not survive a redeploy on an ephemeral host.
+# Move to a database before this carries real client books.
+SUPPRESSION_FILE = BASE_DIR / "suppression.json"
+_suppression_lock = threading.Lock()
+
+
+def _norm_phone(phone):
+    digits = "".join(c for c in str(phone or "") if c.isdigit())
+    if digits.startswith("27"):
+        digits = digits[2:]
+    return digits.lstrip("0")
+
+
+def _norm_email(email):
+    return str(email or "").strip().lower()
+
+
+def load_suppression():
+    if not SUPPRESSION_FILE.exists():
+        return {"entries": []}
+    try:
+        return json.loads(SUPPRESSION_FILE.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"suppression list unreadable, treating as empty: {e}")
+        return {"entries": []}
+
+
+def is_suppressed(email=None, phone=None):
+    """Return the matching entry if this debtor has asked not to be contacted."""
+    e, p = _norm_email(email), _norm_phone(phone)
+    for entry in load_suppression().get("entries", []):
+        if e and _norm_email(entry.get("email")) == e:
+            return entry
+        if p and _norm_phone(entry.get("phone")) == p:
+            return entry
+    return None
+
+
+def add_suppression(email=None, phone=None, reason="", actor="client"):
+    if not email and not phone:
+        raise ValueError("an email address or a phone number is required")
+    entry = {
+        "email": _norm_email(email) or None,
+        "phone": str(phone or "").strip() or None,
+        "reason": reason or "requested by debtor",
+        "actor": actor,
+        "ts": datetime.now().isoformat(timespec="seconds"),
+    }
+    with _suppression_lock:
+        data = load_suppression()
+        data.setdefault("entries", []).append(entry)
+        SUPPRESSION_FILE.write_text(json.dumps(data, indent=2))
+    return entry
 
 LANGUAGE_MAP = {
     "en": "en-ZA", "zu": "zu-ZA", "af": "af-ZA",
@@ -48,7 +120,7 @@ LOGIN_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Novaux — AR Chase</title>
+<title>Averin — Accounts Receivable</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',sans-serif;}
@@ -68,8 +140,8 @@ button:hover{background:#2563eb;}
 </head>
 <body>
 <div class="card">
-  <img class="logo" src="/static/novaux_logo.jpg" alt="Novaux">
-  <h2>AR Chase</h2>
+  <div style="font-size:22px;font-weight:700;color:#f4f4f5;margin-bottom:20px;letter-spacing:-.3px">Averin<span style="color:#00D97E">.</span></div>
+  <h2>Accounts Receivable</h2>
   <p>Authorised access only</p>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
   <form method="POST">
@@ -120,11 +192,11 @@ def priority_score(amount, days_overdue):
     return float(amount) * math.log10(max(float(days_overdue), 1) + 1)
 
 
-def send_email(to, subject, body_html, body_plain=None):
+def send_email(to, subject, body_html, body_plain=None, from_header=None):
     if not RESEND_API_KEY:
         return False, "Resend API key not configured"
     try:
-        payload = {"from": RESEND_FROM, "to": [to], "subject": subject, "html": body_html}
+        payload = {"from": from_header or sender_for(None), "to": [to], "subject": subject, "html": body_html}
         if body_plain:
             payload["text"] = body_plain
         resp = requests.post(
@@ -195,8 +267,8 @@ def debtor_email_body(contact_name, account_name, amount_owed, invoice_ref, clie
   {body_text}
   <div style="margin-top:32px;padding-top:20px;border-top:1px solid #e5e7eb;">
     <p style="font-size:13px;color:#9ca3af;">
-      Sent by <strong>Novaux AI</strong> on behalf of {client_company} ·
-      To opt out, reply with "OPT OUT" · NCA compliant
+      Sent by {client_company} regarding your account ·
+      Reply to this email to query this account or to ask us to stop contacting you
     </p>
   </div>
 </div>"""
@@ -206,36 +278,72 @@ def build_call_prompt(contact_name, account_name, amount_owed, invoice_ref, clie
     amt = f"R{float(amount_owed):,.0f}"
     ref = invoice_ref or "on account"
     if escalate:
-        return f"""You are an AI assistant making a second and final call on behalf of {client_company}. Firm, direct, but still professional.
+        return f"""You are {client_company}'s automated accounts assistant, making a second and final call about an account owed to {client_company}. Firm, direct, but still professional.
 
-NCA COMPLIANCE — MANDATORY:
-- Identify yourself as an AI assistant from Novaux, calling on behalf of {client_company}, in your first sentence.
-- State this is a second attempt. Do not threaten legal action directly, but make clear this is the final automated contact before escalation.
+CONDUCT — MANDATORY:
+- Identify yourself as an automated assistant from {client_company} in your first sentence. Never name any other company.
+- Say the call is recorded.
+- State this is a second attempt. Do not threaten legal action directly, but make clear this is the final automated contact before the account goes to a person.
 
-OPENING: "Hi, could I speak to {contact_name}? — I'm Ava from Novaux calling on behalf of {client_company}. This is our second attempt regarding {amt} outstanding on {ref}. We need to resolve this today to avoid escalation to our collections team."
+OPENING: "Hi, could I speak to {contact_name}? — I'm Ava, the automated accounts assistant at {client_company}, and this call is recorded. This is our second attempt regarding {amt} outstanding on {ref}. We need to resolve this today."
 
 IF THEY CONFIRM AND WANT TO PAY: Get specific date — must be within 5 days. Confirm and note urgency.
 IF INSTALMENTS: Accept only if first payment is within 48 hours.
-IF DISPUTE: Flag immediately, say a human from {client_company} will call within 24 hours.
-IF VOICEMAIL: "Final notice for {contact_name} from Novaux on behalf of {client_company}. {amt} is outstanding on {ref}. Please contact {client_company} within 48 hours to avoid further action."
+IF DISPUTE: Flag immediately, say a person at {client_company} will call within 24 hours. Do not argue the debt.
+IF VOICEMAIL: "Final notice for {contact_name} from {client_company}. {amt} is outstanding on {ref}. Please contact {client_company} within 48 hours."
 IF DON'T CALL AGAIN: Acknowledge, but inform that {client_company} will follow up directly.
 
 TONE: Firm, urgent, professional. This is the last automated contact."""
-    return f"""You are an AI assistant calling on behalf of {client_company}. Professional, calm, direct. Payment follow-up — not aggressive.
+    return f"""You are {client_company}'s automated accounts assistant, calling about an account owed to {client_company}. Professional, calm, direct. Payment follow-up — not aggressive.
 
-NCA COMPLIANCE — MANDATORY:
-- Identify yourself as an AI assistant from Novaux, calling on behalf of {client_company}, in your first sentence.
-- State purpose immediately. Do not threaten legal action. Offer right to dispute. Do not call again within 48h if asked.
+CONDUCT — MANDATORY:
+- Identify yourself as an automated assistant from {client_company} in your first sentence. Never name any other company.
+- Say the call is recorded.
+- State purpose immediately. Do not threaten legal action. Offer the right to dispute. Do not call again within 48h if asked.
 
-OPENING: "Hi, could I speak to {contact_name}? — Great. I'm Ava, an AI assistant from Novaux calling on behalf of {client_company} about {amt} outstanding on account reference {ref}. I'm hoping we can arrange payment today."
+OPENING: "Hi, could I speak to {contact_name}? — Great. I'm Ava, the automated accounts assistant at {client_company}, and this call is recorded. I'm calling about {amt} outstanding on account reference {ref}. I'm hoping we can arrange payment today."
 
 IF THEY CONFIRM AND WANT TO PAY: Get specific date and amount. Confirm and thank.
 IF INSTALMENTS: Capture monthly amount and duration.
 IF DISPUTE: Flag it, say someone will follow up in 2 business days. Do not argue.
-IF VOICEMAIL: "Hi, message for {contact_name} from Novaux on behalf of {client_company} regarding an outstanding account. Please call at your earliest convenience."
+IF VOICEMAIL: "Hi, message for {contact_name} from {client_company} regarding an outstanding account. Please call {client_company} at your earliest convenience."
 IF DON'T CALL AGAIN: Acknowledge and end professionally.
 
 TONE: Calm, factual, non-confrontational."""
+
+
+def send_whatsapp(phone, contact_name, account_name, amount_owed, invoice_ref, client_company, escalate=False):
+    if not WHATSAPP_ENABLED:
+        return False, "WhatsApp off — needs debtor opt-in and an approved template"
+    if not all([TWILIO_SID, TWILIO_TOKEN, TWILIO_WA_FROM]):
+        return False, "Twilio not configured"
+    if not phone.startswith("+27"):
+        return False, f"invalid phone: {phone}"
+    amt = f"R{float(amount_owed):,.0f}"
+    ref = invoice_ref or "on account"
+    first = contact_name.split()[0]
+    if escalate:
+        body = (f"Hi {first}, this is a final notice from {client_company} regarding "
+                f"{amt} outstanding on {ref}. Please settle within 48 hours or reply to arrange a payment plan. "
+                f"— {client_company} Accounts")
+    else:
+        body = (f"Hi {first}, following up from {client_company} regarding "
+                f"{amt} outstanding on invoice {ref}. Please reply or arrange payment at your earliest convenience. "
+                f"— {client_company} Accounts")
+    try:
+        import base64
+        creds = base64.b64encode(f"{TWILIO_SID}:{TWILIO_TOKEN}".encode()).decode()
+        resp = requests.post(
+            f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_SID}/Messages.json",
+            headers={"Authorization": f"Basic {creds}", "Content-Type": "application/x-www-form-urlencoded"},
+            data={"From": TWILIO_WA_FROM, "To": f"whatsapp:{phone}", "Body": body},
+            timeout=10,
+        )
+        if resp.status_code in (200, 201):
+            return True, resp.json().get("sid", "sent")
+        return False, f"{resp.status_code}: {resp.text[:120]}"
+    except Exception as e:
+        return False, str(e)
 
 
 def dispatch_call(row, client_company, escalate=False):
@@ -286,7 +394,7 @@ def send_report_email(to_email, client_company, summary):
     html = f"""
 <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;padding:32px 20px;">
   <div style="background:#0a0a0a;border-radius:12px;padding:24px 28px;margin-bottom:24px;">
-    <p style="font-size:11px;color:#71717a;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Novaux AR Chase</p>
+    <p style="font-size:11px;color:#71717a;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Averin</p>
     <h1 style="font-size:22px;font-weight:700;color:#f4f4f5;margin:0 0 4px;">Chase Complete</h1>
     <p style="font-size:14px;color:#a1a1aa;margin:0;">{client_company} · {datetime.now().strftime('%d %b %Y, %H:%M')}</p>
   </div>
@@ -331,12 +439,13 @@ def send_report_email(to_email, client_company, summary):
   </div>
 
   <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:24px;">
-    Powered by Novaux AI · NCA compliant · info@novaux.co.za
+    Powered by Averin · averin.co.za
   </p>
 </div>"""
 
     plain = f"Chase complete for {client_company}. {summary['contacted']}/{summary['total']} accounts contacted. Total outstanding: R{summary['total_owed']:,.0f}."
-    send_email(to_email, f"AR Chase Report — {client_company}", html, plain)
+    send_email(to_email, f"AR Chase Report — {client_company}", html, plain,
+               from_header=f"Averin <{RESEND_SENDER_DOMAIN}>")
 
 
 # ── Chase engine ─────────────────────────────────────────────────────────────
@@ -365,6 +474,21 @@ def run_chase(session_id, debtors, client_company, demo_mode, report_email=None,
         emit({"type":"update","id":did,"status":"scoring","detail":f"Priority score: {debtor['_score']:.0f}","rank":i+1})
         time.sleep(0.4 if demo_mode else 0.1)
 
+        blocked = is_suppressed(debtor.get("email"), debtor.get("phone"))
+        if blocked:
+            emit({"type":"update","id":did,"status":"suppressed",
+                  "detail": f"Skipped — do not contact ({blocked.get('reason','requested by debtor')})"})
+            debtor_results.append({
+                "account_name": debtor["account_name"],
+                "invoice_ref":  debtor.get("invoice_ref",""),
+                "amount_owed":  amount,
+                "contacted":    False,
+                "outcome_label": "Do not contact",
+                "committed":    0,
+            })
+            emit({"type":"progress","contacted":contacted,"total":len(debtors),"total_owed":total_owed})
+            continue
+
         # Email
         emit({"type":"update","id":did,"status":"emailing","detail":f"Sending {'final notice' if escalate else 'personalised email'}..."})
         to_email = debtor.get("email","")
@@ -372,13 +496,25 @@ def run_chase(session_id, debtors, client_company, demo_mode, report_email=None,
             body = debtor_email_body(debtor["contact_name"], debtor["account_name"],
                                      amount, debtor.get("invoice_ref",""), client_company, escalate=escalate)
             subject = f"Final Notice — {debtor['account_name']}" if escalate else f"Outstanding Account — {debtor['account_name']}"
-            email_ok, email_msg = send_email(to_email, subject, body)
+            email_ok, email_msg = send_email(to_email, subject, body,
+                                               from_header=sender_for(client_company))
         else:
             email_ok, email_msg = False, "no email on record"
 
         time.sleep(0.5 if demo_mode else 0.1)
         emit({"type":"update","id":did,"status":"email_sent" if email_ok else "email_skipped",
               "detail": "Email sent ✓" if email_ok else f"Email skipped: {email_msg}"})
+
+        # WhatsApp
+        time.sleep(0.4 if demo_mode else 0.1)
+        emit({"type":"update","id":did,"status":"whatsapping","detail":"Sending WhatsApp follow-up..."})
+        wa_ok, wa_msg = send_whatsapp(
+            debtor.get("phone",""), debtor["contact_name"], debtor["account_name"],
+            amount, debtor.get("invoice_ref",""), client_company, escalate=escalate
+        )
+        time.sleep(0.5 if demo_mode else 0.1)
+        emit({"type":"update","id":did,"status":"whatsapped" if wa_ok else "wa_skipped",
+              "detail": "WhatsApp sent ✓" if wa_ok else f"WhatsApp skipped: {wa_msg}"})
 
         # Call
         time.sleep(0.5 if demo_mode else 0.1)
@@ -472,6 +608,50 @@ def demo_data():
     return jsonify({"debtors":debtors,"total_owed":total,"est_recovery":total*0.62,"count":len(debtors),"errors":[]})
 
 
+@app.route("/api/suppression", methods=["GET"])
+@login_required
+def list_suppression():
+    """Everyone currently on the do-not-contact list."""
+    return jsonify(load_suppression())
+
+
+@app.route("/api/suppress", methods=["POST"])
+@login_required
+def suppress():
+    """Record that a debtor has asked not to be contacted again."""
+    body = request.get_json(silent=True) or {}
+    try:
+        entry = add_suppression(
+            email=body.get("email"),
+            phone=body.get("phone"),
+            reason=body.get("reason", ""),
+            actor=body.get("actor", "client"),
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"suppressed": entry}), 201
+
+
+@app.route("/api/suppress", methods=["DELETE"])
+@login_required
+def unsuppress():
+    """Undo a do-not-contact entry added in error."""
+    body = request.get_json(silent=True) or {}
+    email, phone = body.get("email"), body.get("phone")
+    if not email and not phone:
+        return jsonify({"error": "an email address or a phone number is required"}), 400
+    with _suppression_lock:
+        data = load_suppression()
+        before = len(data.get("entries", []))
+        data["entries"] = [
+            e for e in data.get("entries", [])
+            if not ((email and _norm_email(e.get("email")) == _norm_email(email))
+                    or (phone and _norm_phone(e.get("phone")) == _norm_phone(phone)))
+        ]
+        SUPPRESSION_FILE.write_text(json.dumps(data, indent=2))
+    return jsonify({"removed": before - len(data["entries"])})
+
+
 @app.route("/api/chase", methods=["POST"])
 @login_required
 def start_chase():
@@ -515,7 +695,7 @@ def stream(sid):
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5001))
     print(f"\n{'='*50}")
-    print(f"  Novaux AR Chase — Production")
+    print(f"  Averin — Accounts Receivable")
     print(f"  http://localhost:{port}")
     print(f"  Password: {DASHBOARD_PASSWORD}")
     print(f"{'='*50}\n")
